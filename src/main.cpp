@@ -1,5 +1,7 @@
 
+#include <co_async/awaiter/task.hpp>
 #include <co_async/co_async.hpp>
+#include <co_async/iostream/ssl_socket_stream.hpp>
 #include <co_async/std.hpp>
 
 #include "Pool/ThreadPoolManager.hpp"
@@ -45,13 +47,7 @@ std::vector<Worker> workers(std::thread::hardware_concurrency());
 Worker &getWorker()
 {
     static std::atomic_int64_t i = 0;
-    return workers[(i++)%4];
-}
-
-Task<Expected<>> responseHTTP(HTTPServer::IO::Ptr io, HTTPResponse res, std::string_view body)
-{
-    co_await io->response(res, body);
-    co_return {};
+    return workers[(i++)%16];
 }
 
 static Task<Expected<>> amain(std::string serveAt) {
@@ -71,7 +67,10 @@ static Task<Expected<>> amain(std::string serveAt) {
                 },
             };
             std::string_view body = "++";
-            getWorker().spawn(responseHTTP(io, res, body));
+            getWorker().spawn(co_bind([_io = io, res, body]() mutable -> Task<Expected<>> {
+                co_await co_await _io->response(res, body);
+                co_return {};
+            }));
             co_return;
         });
         co_return {};
@@ -81,9 +80,18 @@ static Task<Expected<>> amain(std::string serveAt) {
         workers[i].start(i);
     }
 
+    SSLServerState ssl;
+    auto file_crt = co_await co_await file_open("./cert/server.crt", OpenMode::Read);
+    auto file_key = co_await co_await file_open("./cert/server.key", OpenMode::Read);
+    String buffer_crt = *(co_await file_crt.getall());
+    String buffer_key = *(co_await file_key.getall());
+    co_await ssl.cert.add(buffer_crt);
+    co_await ssl.skey.set(buffer_key);
+
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
-            getWorker().spawn(server.handle_http(std::move(*income)));
+            getWorker().spawn(server.handle_https(std::move(*income), ssl));
+            // getWorker().spawn(server.handle_http(std::move(*income)));
         }
     }
     co_return {};

@@ -12,7 +12,9 @@ StructPImpl(SSLClientTrustAnchor) {
     Expected<> add(std::string_view content);
 };
 
-StructPImpl(SSLServerPrivateKey){};
+StructPImpl(SSLServerPrivateKey) {
+    Expected<> set(std::string_view content);
+};
 
 StructPImpl(SSLServerCertificate) {
     Expected<> add(std::string_view content);

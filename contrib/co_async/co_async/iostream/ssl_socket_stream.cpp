@@ -745,6 +745,8 @@ OwningStream ssl_accept(SocketHandle file, SSLServerCertificate const &cert,
 }
 
 DefinePImpl(SSLServerPrivateKey);
+Expected<> ForwardPImplMethod(SSLServerPrivateKey, set,
+    (std::string_view content), content);
 DefinePImpl(SSLClientTrustAnchor);
 Expected<> ForwardPImplMethod(SSLClientTrustAnchor, add,
                               (std::string_view content), content);
