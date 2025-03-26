@@ -217,7 +217,7 @@ struct SplitString {
                 } else if constexpr (std::is_same_v<Delim, char>) {
                     s = s.substr(pos + 1);
                 } else {
-                    static_assert(!std::is_void_v<std::void_t<Delim>>);
+                    // static_assert(!std::is_void_v<std::void_t<Delim>>);
                 }
             }
         }

@@ -1,4 +1,3 @@
-#include <bearssl.h>
 #include <co_async/awaiter/task.hpp>
 #include <co_async/iostream/socket_stream.hpp>
 #include <co_async/iostream/ssl_socket_stream.hpp>
@@ -10,6 +9,11 @@
 #include <co_async/platform/socket.hpp>
 #include <co_async/utils/pimpl.hpp>
 #include <co_async/utils/string_utils.hpp>
+
+extern "C" 
+{
+    #include <bearssl.h>
+}
 
 namespace co_async {
 std::error_category const &bearSSLCategory() {
