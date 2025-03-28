@@ -60,7 +60,6 @@ static Task<Expected<>> amain(std::string serveAt) {
         // auto _body = co_await co_await io->request_body();
         pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([io]() -> concurrencpp::result<void>
         {
-            std::cout << "ThreadPool" << std::endl;
             HTTPResponse res = {
                 .status = 200,
                 .headers = {
@@ -91,7 +90,6 @@ static Task<Expected<>> amain(std::string serveAt) {
 
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
-            std::cout << "start" << std::endl;
             getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>>
             {
                 SSLServerState ssl_local;

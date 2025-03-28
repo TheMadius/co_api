@@ -494,7 +494,7 @@ struct SSLServerSessionCache {
     std::unique_ptr<unsigned char[]> mLruBuf;
     br_ssl_session_cache_lru mLru;
 
-    explicit SSLServerSessionCache(std::size_t size = 512) {
+    explicit SSLServerSessionCache(std::size_t size = 8 * 512) {
         mLruBuf = std::make_unique<unsigned char[]>(size);
         br_ssl_session_cache_lru_init(&mLru, mLruBuf.get(), size);
     }
