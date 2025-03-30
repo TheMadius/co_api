@@ -233,6 +233,9 @@ target_link_libraries(co_async PUBLIC bearssl)
 find_package(Threads REQUIRED)
 target_link_libraries(co_async PUBLIC Threads::Threads)
 
+find_package(OpenSSL REQUIRED)
+target_link_libraries(co_async PUBLIC ${OPENSSL_LIBRARIES})
+
 find_package(TBB REQUIRED COMPONENTS tbb REQUIRED)
 target_link_libraries(co_async PUBLIC TBB::tbb)
 

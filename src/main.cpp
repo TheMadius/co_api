@@ -81,21 +81,13 @@ static Task<Expected<>> amain(std::string serveAt) {
     }
 
     SSLServerState ssl;
-    auto file_crt = co_await co_await file_open("./cert/server.crt", OpenMode::Read);
-    auto file_key = co_await co_await file_open("./cert/server.key", OpenMode::Read);
-    String buffer_crt = *(co_await file_crt.getall());
-    String buffer_key = *(co_await file_key.getall());
-    co_await ssl.cert.add(buffer_crt);
-    co_await ssl.skey.set(buffer_key);
+    ssl.initSSLctx("./cert/server.crt", "./cert/server.key");
 
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
             getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>>
             {
-                SSLServerState ssl_local;
-                ssl_local.cert = ssl.cert;
-                ssl_local.skey = ssl.skey;
-                co_await co_await server.handle_https(std::move(*income), ssl_local);
+                co_await co_await server.handle_https(std::move(*income), ssl);
                 // co_await co_await server.handle_http(std::move(*income));
                 co_return {};
             }));

@@ -11,9 +11,40 @@
 #include <co_async/utils/expected.hpp>
 #include <co_async/utils/simple_map.hpp>
 #include <co_async/utils/string_utils.hpp>
+
 #include <memory>
 
 namespace co_async {
+
+void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std::string pem)
+{
+    // Creates a server that will negotiate the highest version of SSL/TLS supported
+    // by the client it is connecting to.
+
+    ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        exit(EXIT_FAILURE);
+    }
+
+    const long flags = SSL_EXT_TLS1_3_ONLY;
+    SSL_CTX_set_options(ctx, flags);
+
+    SSL_CTX_set_ecdh_auto(ctx, 1);
+
+    SSL_CTX_set_default_passwd_cb_userdata(ctx, (void *)(pem.c_str()));
+    /* Set the key and cert */
+    if (SSL_CTX_use_certificate_chain_file(ctx, path_crt.c_str()) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx, path_key.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+}
+
 struct HTTPServer::Impl {
     struct Route {
         HTTPHandler mHandler;
@@ -246,12 +277,7 @@ void HTTPServer::route(HTTPHandler handler) {
 Task<std::shared_ptr<HTTPProtocol>>
 HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
     using namespace std::string_view_literals;
-    static char const *const protocols[] = {
-        /* "h2", */
-        "http/1.1",
-    };
-    auto sock = ssl_accept(std::move(handle), https.cert, https.skey, protocols,
-                           &https.cache);
+    auto sock = co_await ssl_accept(std::move(handle), https.ctx);
     sock.timeout(mImpl->mTimeout);
     /* if (auto peek = co_await sock.peekn(2); peek && *peek == "h2"sv) { */
     /*     co_return std::make_unique<HTTPProtocolVersion2>(std::move(sock)); */
@@ -316,8 +342,7 @@ HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const {
     co_return {};
 }
 
-Task<Expected<>> HTTPServer::handle_https(SocketHandle handle,
-                                          SSLServerState &https) const {
+Task<Expected<>> HTTPServer::handle_https(SocketHandle handle, SSLServerState &https) const {
     /* int h = handle.fileNo(); */
     co_await co_await doHandleConnection(
         co_await prepareHTTPS(std::move(handle), https));

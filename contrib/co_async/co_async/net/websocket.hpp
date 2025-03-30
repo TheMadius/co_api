@@ -36,12 +36,12 @@ inline std::string websocketGenerateNonce() {
 
 inline std::string websocketSecretHash(std::string userKey) {
     // websocket 官方要求的神秘仪式
-    SHA1 sha1;
+    hash::SHA1 sha1;
     std::string inKey = userKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     sha1.add(inKey.data(), inKey.size());
-    uint8_t buf[SHA1::HashBytes];
+    uint8_t buf[hash::SHA1::HashBytes];
     sha1.getHash(buf);
-    return base64::encode_into<std::string>(buf, buf + SHA1::HashBytes);
+    return base64::encode_into<std::string>(buf, buf + hash::SHA1::HashBytes);
 }
 
 inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO &io) {

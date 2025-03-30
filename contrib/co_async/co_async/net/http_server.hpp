@@ -21,9 +21,8 @@ enum class HTTPRouteMode {
 };
 
 struct SSLServerState {
-    PImpl<SSLServerCertificate> cert;
-    PImpl<SSLServerPrivateKey> skey;
-    PImpl<SSLServerSessionCache> cache;
+    void initSSLctx(std::string path_crt, std::string path_key, std::string pem = "");
+    SSL_CTX* ctx = NULL;
 };
 
 struct HTTPServer {
@@ -74,8 +73,7 @@ struct HTTPServer {
     Task<std::shared_ptr<HTTPProtocol>> prepareHTTP(SocketHandle handle) const;
     Task<Expected<>> handle_http(SocketHandle handle) const;
     Task<Expected<>> handle_http_redirect_to_https(SocketHandle handle) const;
-    Task<Expected<>> handle_https(SocketHandle handle,
-                                  SSLServerState &https) const;
+    Task<Expected<>> handle_https(SocketHandle handle, SSLServerState &https) const;
     Task<Expected<>>
     doHandleConnection(std::shared_ptr<HTTPProtocol> http) const;
     static Task<Expected<>> make_error_response(IO::Ptr &io, int status);
