@@ -503,35 +503,38 @@ struct SSLServerSessionCache {
 template<typename T>
 using deleted_unique_ptr = std::unique_ptr<T,std::function<void(T*)>>;
 
+#define BUFFER_SIZE 512
+
 namespace {
 struct SSLSocketStream : Stream {
 private:
     SocketStream raw;
     BIO *readBIO;
     BIO *writeBIO;
+    std::unique_ptr<char> _buffer;
     deleted_unique_ptr<SSL> ssl_client = nullptr;
 
     public:
-    explicit SSLSocketStream(SocketHandle file) : raw(std::move(file)) {}
+    explicit SSLSocketStream(SocketHandle file) : raw(std::move(file)) 
+    {
+        _buffer = std::unique_ptr<char>(new char[BUFFER_SIZE]);
+    }
 
     Task<Expected<>> doSSLHandshake()
     {
-        char buffer[1024] = { 0 };
         while (!SSL_is_init_finished(ssl_client.get())) {
             SSL_do_handshake(ssl_client.get());
 
-            int bytesToWrite = BIO_read(writeBIO, buffer, (size_t)sizeof(buffer));
+            int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
 
             if (bytesToWrite > 0)
             {
-                printf("Host has %d bytes encrypted data to send\n", bytesToWrite);
-                auto e = co_await raw.raw_write({buffer, (size_t)bytesToWrite});
+                auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
             }
             else {
-                size_t receivedBytes = *(co_await raw.raw_read({buffer, sizeof(buffer)}));
+                size_t receivedBytes = *(co_await raw.raw_read({_buffer.get(), BUFFER_SIZE}));
                 if (receivedBytes > 0) {
-                    printf("Host has received %d bytes data\n", receivedBytes);
-                    BIO_write(readBIO, buffer, receivedBytes);
+                    BIO_write(readBIO, _buffer.get(), receivedBytes);
                 }
             }
         }
@@ -558,27 +561,25 @@ protected:
 
 public:
 
-    Task<Expected<>> raw_flush() override 
+    Task<Expected<>> raw_flush() override
     {
         co_return {};
     }
 
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
-        char *local_buffer = new char[buffer.size()];
-        size_t receivedBytes = *(co_await raw.raw_read({local_buffer, buffer.size()}));
+        size_t receivedBytes = *(co_await raw.raw_read({_buffer.get(), BUFFER_SIZE}));
         if (receivedBytes > 0) {
-            BIO_write(readBIO, local_buffer, receivedBytes);
+            BIO_write(readBIO, _buffer.get(), receivedBytes);
         }
 
         // SSL_read overrides buffer
-        int sizeUnencryptBytes = SSL_read(ssl_client.get(), local_buffer, receivedBytes);
+        int sizeUnencryptBytes = SSL_read(ssl_client.get(), _buffer.get(), receivedBytes);
         if (sizeUnencryptBytes < 0) {
             exit(EXIT_FAILURE);
         }
 
-        memcpy(buffer.data(), local_buffer, sizeUnencryptBytes);
-        delete[] local_buffer;
+        memcpy(buffer.data(), _buffer.get(), sizeUnencryptBytes);
         co_return sizeUnencryptBytes;
     }
 
@@ -594,16 +595,14 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        char *local_buffer = new char[1024];
         do
         {
-            int bytesToWrite = BIO_read(writeBIO, local_buffer, (size_t)sizeof(local_buffer));
+            int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
             if (bytesToWrite > 0)
-                auto e = co_await raw.raw_write({local_buffer, (size_t)bytesToWrite});
+                auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
             else
                 break;
         } while (true);
-        delete[] local_buffer;
         co_return sizeUnencryptBytes;
     }
 
@@ -622,7 +621,10 @@ struct SSLServerSocketStream : public SSLSocketStream
 public:
     explicit SSLServerSocketStream(SocketHandle file, SSL_CTX *ctx)
     : SSLSocketStream(std::move(file)) {
-        setSSL(SSL_new(ctx));
+        auto ssl = SSL_new(ctx);
+        if (ssl == NULL)
+            throw std::logic_error("Error create ssl client");
+        setSSL(ssl);
     }
 };
 

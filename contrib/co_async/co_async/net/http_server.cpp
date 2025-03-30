@@ -18,6 +18,16 @@ namespace co_async {
 
 void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std::string pem)
 {
+    static int s_initialized = 0;
+    if (s_initialized == 0) {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+        SSL_library_init();
+        SSL_load_error_strings();
+#else
+        OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT, NULL);
+#endif
+        s_initialized = 1;
+    }
     // Creates a server that will negotiate the highest version of SSL/TLS supported
     // by the client it is connecting to.
 
@@ -26,23 +36,37 @@ void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std:
         perror("Unable to create SSL context");
         exit(EXIT_FAILURE);
     }
-
+    int mode = SSL_VERIFY_NONE;
     const long flags = SSL_EXT_TLS1_3_ONLY;
     SSL_CTX_set_options(ctx, flags);
-
     SSL_CTX_set_ecdh_auto(ctx, 1);
-
     SSL_CTX_set_default_passwd_cb_userdata(ctx, (void *)(pem.c_str()));
+
     /* Set the key and cert */
     if (SSL_CTX_use_certificate_chain_file(ctx, path_crt.c_str()) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
-
-    if (SSL_CTX_use_PrivateKey_file(ctx, path_key.c_str(), SSL_FILETYPE_PEM) <= 0) {
+    if (SSL_CTX_use_PrivateKey_file(ctx, path_key.c_str(), SSL_FILETYPE_PEM) <= 0) 
+    {
         ERR_print_errors_fp(stderr);
+        fprintf(stderr, "ssl key_file check failed!\n");
         exit(EXIT_FAILURE);
     }
+    if (!SSL_CTX_check_private_key(ctx))
+    {
+        ERR_print_errors_fp(stderr);
+        fprintf(stderr, "ssl key_file check failed!\n");
+        exit(EXIT_FAILURE);
+    }
+    if (mode == SSL_VERIFY_PEER )
+    {
+        SSL_CTX_set_default_verify_paths(ctx);
+    }
+#ifdef SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
+    SSL_CTX_set_mode(ctx, SSL_CTX_get_mode(ctx) | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+#endif
+    SSL_CTX_set_verify(ctx, mode, NULL);
 }
 
 struct HTTPServer::Impl {
