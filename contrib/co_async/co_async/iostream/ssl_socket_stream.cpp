@@ -503,7 +503,6 @@ struct SSLServerSessionCache {
 template<typename T>
 using deleted_unique_ptr = std::unique_ptr<T,std::function<void(T*)>>;
 
-
 namespace {
 struct SSLSocketStream : Stream {
 private:
@@ -511,33 +510,36 @@ private:
     BIO *readBIO;
     BIO *writeBIO;
     deleted_unique_ptr<SSL> ssl_client = nullptr;
-    char buffer[1024] = { 0 };
 
-public:
+    public:
     explicit SSLSocketStream(SocketHandle file) : raw(std::move(file)) {}
 
     Task<Expected<>> doSSLHandshake()
     {
+        char buffer[1024] = { 0 };
         while (!SSL_is_init_finished(ssl_client.get())) {
             SSL_do_handshake(ssl_client.get());
 
-            size_t bytesToWrite = BIO_read(writeBIO, buffer, (size_t)sizeof(buffer));
+            int bytesToWrite = BIO_read(writeBIO, buffer, (size_t)sizeof(buffer));
 
-            if (bytesToWrite > 0) {
-                auto e = co_await raw.raw_write({buffer, bytesToWrite});
+            if (bytesToWrite > 0)
+            {
+                printf("Host has %d bytes encrypted data to send\n", bytesToWrite);
+                auto e = co_await raw.raw_write({buffer, (size_t)bytesToWrite});
             }
             else {
                 size_t receivedBytes = *(co_await raw.raw_read({buffer, sizeof(buffer)}));
                 if (receivedBytes > 0) {
+                    printf("Host has received %d bytes data\n", receivedBytes);
                     BIO_write(readBIO, buffer, receivedBytes);
                 }
             }
         }
-        printf("Host SSL handshake done!\n");
         co_return {};
     }
 
 protected:
+
     void setSSL(SSL *ssl_)
     {
         ssl_client = deleted_unique_ptr<SSL>(ssl_,
@@ -554,8 +556,8 @@ protected:
         SSL_set_accept_state(ssl_client.get()); // Server
     }
 
-
 public:
+
     Task<Expected<>> raw_flush() override 
     {
         co_return {};
@@ -575,27 +577,34 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        char* msg = new char[sizeUnencryptBytes];
         memcpy(buffer.data(), local_buffer, sizeUnencryptBytes);
+        delete[] local_buffer;
         co_return sizeUnencryptBytes;
     }
 
     Task<Expected<std::size_t>>
-    raw_write(std::span<char const> buffer) override {
-        // unsigned char *buf;
-        // std::size_t alen;
-        // if (buffer.empty()) [[unlikely]] {
-        //     co_return std::size_t(0);
-        // }
-        // co_await co_await bearSSLRunUntil(BR_SSL_SENDAPP);
-        // buf = br_ssl_engine_sendapp_buf(eng, &alen);
-        // if (alen > buffer.size()) {
-        //     alen = buffer.size();
-        // }
-        // memcpy(buf, buffer.data(), alen);
-        // br_ssl_engine_sendapp_ack(eng, alen);
-        // co_return alen;
-        co_return 0;
+    raw_write(std::span<char const> buffer) override 
+    {
+        if (buffer.size() == 0)
+            co_return {};
+
+        // SSL_write overrides buffer
+        int sizeUnencryptBytes = SSL_write(ssl_client.get(), buffer.data(), buffer.size());
+        if (sizeUnencryptBytes < 0) {
+            exit(EXIT_FAILURE);
+        }
+
+        char *local_buffer = new char[1024];
+        do
+        {
+            int bytesToWrite = BIO_read(writeBIO, local_buffer, (size_t)sizeof(local_buffer));
+            if (bytesToWrite > 0)
+                auto e = co_await raw.raw_write({local_buffer, (size_t)bytesToWrite});
+            else
+                break;
+        } while (true);
+        delete[] local_buffer;
+        co_return sizeUnencryptBytes;
     }
 
     Task<> raw_close() override {
