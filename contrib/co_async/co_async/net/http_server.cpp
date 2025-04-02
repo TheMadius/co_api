@@ -363,7 +363,9 @@ HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const {
 
 Task<Expected<>> HTTPServer::handle_https(SocketHandle handle, SSLServerState &https) const {
     /* int h = handle.fileNo(); */
-    co_await co_await doHandleConnection(co_await prepareHTTPS(std::move(handle), https));
+    auto sock = co_await prepareHTTPS(std::move(handle), https);
+    if (sock)
+        co_await co_await doHandleConnection(sock);
     /* co_await UringOp().prep_shutdown(h, SHUT_RDWR); */
     co_return {};
 }
