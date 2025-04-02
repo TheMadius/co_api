@@ -644,12 +644,16 @@ public:
         co_return send_byte;
     }
 
-    Task<> raw_close() override {
+    Task<> raw_close() override
+    {
         SSL_shutdown(ssl_client.get());
+        co_await Stream::raw_close();
+        co_await raw.raw_close();
         co_return;
     }
 
-    void raw_timeout(std::chrono::steady_clock::duration timeout) override {
+    void raw_timeout(std::chrono::steady_clock::duration timeout) override 
+    {
         raw.raw_timeout(timeout);
     }
 };
@@ -716,13 +720,13 @@ ssl_connect(char const *host, int port, SSLClientTrustAnchor const &ta,
 
 Task<Expected<OwningStream>>
 ssl_accept(SocketHandle file, SSL_CTX *ctx,
-            std::chrono::steady_clock::duration dur) {
+            std::chrono::steady_clock::duration timeout) {
     auto ssl_stream = std::make_unique<SSLServerSocketStream>(std::move(file), ctx);
-    ssl_stream->raw_timeout(dur);
-
+    ssl_stream->raw_timeout(timeout);
     auto e = co_await ssl_stream->doSSLHandshake();
     if (!e)
     {
+        co_await ssl_stream->raw_close();
         if (e.has_error())
             co_return CO_ASYNC_ERROR_FORWARD(e);
         else

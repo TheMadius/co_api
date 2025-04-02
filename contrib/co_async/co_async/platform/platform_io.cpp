@@ -219,7 +219,8 @@ bool PlatformIOContext::waitEventsFor(
     struct io_uring_cqe *cqe;
     struct __kernel_timespec ts, *tsp;
     if (timeout) {
-        tsp = &(ts = durationToKernelTimespec(*timeout));
+        ts = durationToKernelTimespec(*timeout);
+        tsp = &ts;
     } else {
         tsp = nullptr;
     }

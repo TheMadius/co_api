@@ -309,6 +309,7 @@ HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
     if (sock.has_error())
         co_return nullptr;
 
+    sock->timeout(mImpl->mTimeout);
     co_return std::make_shared<HTTPProtocolVersion11>(std::move(*sock));
 }
 
