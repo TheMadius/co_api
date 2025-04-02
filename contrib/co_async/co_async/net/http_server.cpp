@@ -16,6 +16,12 @@
 
 namespace co_async {
 
+SSLServerState::~SSLServerState()
+{
+    if (ctx)
+        SSL_CTX_free(ctx);
+}
+
 void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std::string pem)
 {
     static int s_initialized = 0;
@@ -31,15 +37,17 @@ void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std:
     // Creates a server that will negotiate the highest version of SSL/TLS supported
     // by the client it is connecting to.
 
-    ctx = SSL_CTX_new(TLS_server_method());
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    ctx = SSL_CTX_new(SSLv23_method());
+#else
+    ctx = SSL_CTX_new(TLS_method());
+#endif
     if (!ctx) {
         throw std::runtime_error("Unable to create SSL context");
     }
     int mode = SSL_VERIFY_NONE;
-    const long flags = SSL_EXT_TLS1_3_ONLY;
-    SSL_CTX_set_options(ctx, flags);
-    SSL_CTX_set_ecdh_auto(ctx, 1);
     SSL_CTX_set_default_passwd_cb_userdata(ctx, (void *)(pem.c_str()));
+    SSL_CTX_set_verify_depth(ctx, 10);
 
     /* Set the key and cert */
     if (SSL_CTX_use_certificate_chain_file(ctx, path_crt.c_str()) <= 0)

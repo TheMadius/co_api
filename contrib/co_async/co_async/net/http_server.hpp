@@ -22,7 +22,10 @@ enum class HTTPRouteMode {
 
 struct SSLServerState {
     void initSSLctx(std::string path_crt, std::string path_key, std::string pem = "");
+
     SSL_CTX* ctx = NULL;
+
+    ~SSLServerState();
 };
 
 struct HTTPServer {

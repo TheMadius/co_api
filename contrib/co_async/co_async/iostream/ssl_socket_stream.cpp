@@ -528,11 +528,25 @@ private:
             if (bytesToWrite > 0)
             {
                 auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
-                if (e.has_error())
-                    co_return CO_ASYNC_ERROR_FORWARD(e);
+                if (!e)
+                {
+                    if (e.has_error())
+                        co_return CO_ASYNC_ERROR_FORWARD(e);
+                    else
+                        co_return std::errc::broken_pipe;
+                }
             }
-            else {
-                size_t receivedBytes = *(co_await raw.raw_read({_buffer.get(), BUFFER_SIZE}));
+            else
+            {
+                auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
+                if (!e)
+                {
+                    if (e.has_error())
+                        co_return CO_ASYNC_ERROR_FORWARD(e);
+                    else
+                        co_return std::errc::broken_pipe;
+                }
+                size_t receivedBytes = *e;
                 if (receivedBytes > 0) {
                     BIO_write(readBIO, _buffer.get(), receivedBytes);
                 }
@@ -550,7 +564,6 @@ protected:
         {
             if (ssl)
             {
-                SSL_shutdown(ssl);
                 SSL_free(ssl);
             }
         });
@@ -572,8 +585,13 @@ public:
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
         auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
-        if (e.has_error())
-            co_return CO_ASYNC_ERROR_FORWARD(e);
+        if (!e)
+        {
+            if (e.has_error())
+                co_return CO_ASYNC_ERROR_FORWARD(e);
+            else
+                co_return std::errc::broken_pipe;
+        }
 
         size_t receivedBytes = *(e);
         if (receivedBytes <= 0)
@@ -609,8 +627,13 @@ public:
                 if (bytesToWrite > 0)
                 {
                     auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
-                    if (e.has_error())
-                        co_return CO_ASYNC_ERROR_FORWARD(e);
+                    if (!e)
+                    {
+                        if (e.has_error())
+                            co_return CO_ASYNC_ERROR_FORWARD(e);
+                        else
+                            co_return std::errc::broken_pipe;
+                    }
                 }
                 else
                 {
@@ -618,12 +641,11 @@ public:
                 }
             } while (true);
         } while (send_byte < buffer.size());
-
         co_return send_byte;
     }
 
     Task<> raw_close() override {
-        ssl_client.reset(nullptr);
+        SSL_shutdown(ssl_client.get());
         co_return;
     }
 
@@ -699,8 +721,13 @@ ssl_accept(SocketHandle file, SSL_CTX *ctx,
     ssl_stream->raw_timeout(dur);
 
     auto e = co_await ssl_stream->doSSLHandshake();
-    if (e.has_error())
-        co_return CO_ASYNC_ERROR_FORWARD(e);
+    if (!e)
+    {
+        if (e.has_error())
+            co_return CO_ASYNC_ERROR_FORWARD(e);
+        else
+            co_return std::errc::broken_pipe;
+    }
     co_return OwningStream(std::move(ssl_stream));
 }
 
