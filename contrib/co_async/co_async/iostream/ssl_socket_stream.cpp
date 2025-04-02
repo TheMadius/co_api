@@ -522,7 +522,10 @@ private:
 
     Task<Expected<>> doSSLHandshake()
     {
-        while (!SSL_is_init_finished(ssl_client.get())) {
+        int count = 0;
+        while (!SSL_is_init_finished(ssl_client.get()))
+        {
+            if (++count >= 5000) co_return std::errc::broken_pipe;
             SSL_do_handshake(ssl_client.get());
             int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
             if (bytesToWrite > 0)
