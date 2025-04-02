@@ -524,12 +524,12 @@ private:
     {
         while (!SSL_is_init_finished(ssl_client.get())) {
             SSL_do_handshake(ssl_client.get());
-
             int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
-
             if (bytesToWrite > 0)
             {
                 auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
+                if (e.has_error())
+                    co_return CO_ASYNC_ERROR_FORWARD(e);
             }
             else {
                 size_t receivedBytes = *(co_await raw.raw_read({_buffer.get(), BUFFER_SIZE}));
@@ -548,11 +548,14 @@ protected:
         ssl_client = deleted_unique_ptr<SSL>(ssl_,
         [](SSL *ssl)
         {
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
+            if (ssl)
+            {
+                SSL_shutdown(ssl);
+                SSL_free(ssl);
+            }
         });
 
-        readBIO = BIO_new(BIO_s_mem());
+        readBIO  = BIO_new(BIO_s_mem());
         writeBIO = BIO_new(BIO_s_mem());
 
         SSL_set_bio(ssl_client.get(), readBIO, writeBIO);
@@ -568,42 +571,53 @@ public:
 
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
-        size_t receivedBytes = *(co_await raw.raw_read({_buffer.get(), BUFFER_SIZE}));
-        if (receivedBytes > 0) {
-            BIO_write(readBIO, _buffer.get(), receivedBytes);
-        }
+        auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
+        if (e.has_error())
+            co_return CO_ASYNC_ERROR_FORWARD(e);
+
+        size_t receivedBytes = *(e);
+        if (receivedBytes <= 0)
+            co_return 0;
+
+        BIO_write(readBIO, _buffer.get(), receivedBytes);
 
         // SSL_read overrides buffer
         int sizeUnencryptBytes = SSL_read(ssl_client.get(), _buffer.get(), receivedBytes);
-        if (sizeUnencryptBytes < 0) {
-            exit(EXIT_FAILURE);
-        }
+        if (sizeUnencryptBytes < 0)
+            co_return 0;
 
         memcpy(buffer.data(), _buffer.get(), sizeUnencryptBytes);
         co_return sizeUnencryptBytes;
     }
 
     Task<Expected<std::size_t>>
-    raw_write(std::span<char const> buffer) override 
+    raw_write(std::span<char const> buffer) override
     {
         if (buffer.size() == 0)
             co_return {};
 
+        uint64_t send_byte = 0;
         // SSL_write overrides buffer
-        int sizeUnencryptBytes = SSL_write(ssl_client.get(), buffer.data(), buffer.size());
-        if (sizeUnencryptBytes < 0) {
-            exit(EXIT_FAILURE);
-        }
-
-        do
-        {
-            int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
-            if (bytesToWrite > 0)
-                auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
-            else
+        do {
+            int sizeUnencryptBytes = SSL_write(ssl_client.get(), buffer.data() + send_byte, buffer.size() - send_byte);
+            if (sizeUnencryptBytes <= 0)
                 break;
-        } while (true);
-        co_return sizeUnencryptBytes;
+
+            send_byte += sizeUnencryptBytes;
+            do {
+                int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
+                if (bytesToWrite > 0)
+                {
+                    auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
+                    if (e.has_error())
+                        co_return CO_ASYNC_ERROR_FORWARD(e);
+                }
+                else
+                    break;
+            } while (true);
+        } while (send_byte < buffer.size());
+
+        co_return send_byte;
     }
 
     Task<> raw_close() override {
@@ -676,10 +690,12 @@ ssl_connect(char const *host, int port, SSLClientTrustAnchor const &ta,
     co_return sock;
 }
 
-Task<OwningStream>
+Task<Expected<OwningStream>>
 ssl_accept(SocketHandle file, SSL_CTX *ctx) {
     auto ssl_stream = std::make_unique<SSLServerSocketStream>(std::move(file), ctx);
-    (void)(co_await ssl_stream->doSSLHandshake());
+    auto e = co_await ssl_stream->doSSLHandshake();
+    if (e.has_error())
+        co_return CO_ASYNC_ERROR_FORWARD(e);
     co_return OwningStream(std::move(ssl_stream));
 }
 

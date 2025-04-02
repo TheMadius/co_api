@@ -33,8 +33,7 @@ void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std:
 
     ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) {
-        perror("Unable to create SSL context");
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("Unable to create SSL context");
     }
     int mode = SSL_VERIFY_NONE;
     const long flags = SSL_EXT_TLS1_3_ONLY;
@@ -43,21 +42,17 @@ void SSLServerState::initSSLctx(std::string path_crt, std::string path_key, std:
     SSL_CTX_set_default_passwd_cb_userdata(ctx, (void *)(pem.c_str()));
 
     /* Set the key and cert */
-    if (SSL_CTX_use_certificate_chain_file(ctx, path_crt.c_str()) <= 0) {
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-    if (SSL_CTX_use_PrivateKey_file(ctx, path_key.c_str(), SSL_FILETYPE_PEM) <= 0) 
+    if (SSL_CTX_use_certificate_chain_file(ctx, path_crt.c_str()) <= 0)
     {
-        ERR_print_errors_fp(stderr);
-        fprintf(stderr, "ssl key_file check failed!\n");
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("ssl cert_file read failed!");
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, path_key.c_str(), SSL_FILETYPE_PEM) <= 0)
+    {
+        throw std::runtime_error("ssl key_file check failed!");
     }
     if (!SSL_CTX_check_private_key(ctx))
     {
-        ERR_print_errors_fp(stderr);
-        fprintf(stderr, "ssl key_file check failed!\n");
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("ssl key_file check failed!");
     }
     if (mode == SSL_VERIFY_PEER )
     {
@@ -302,11 +297,11 @@ Task<std::shared_ptr<HTTPProtocol>>
 HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
     using namespace std::string_view_literals;
     auto sock = co_await ssl_accept(std::move(handle), https.ctx);
-    sock.timeout(mImpl->mTimeout);
-    /* if (auto peek = co_await sock.peekn(2); peek && *peek == "h2"sv) { */
-    /*     co_return std::make_unique<HTTPProtocolVersion2>(std::move(sock)); */
-    /* } */
-    co_return std::make_shared<HTTPProtocolVersion11>(std::move(sock));
+    if (sock.has_error())
+        co_return nullptr;
+
+    sock->timeout(mImpl->mTimeout);
+    co_return std::make_shared<HTTPProtocolVersion11>(std::move(*sock));
 }
 
 Task<std::shared_ptr<HTTPProtocol>>
@@ -368,8 +363,7 @@ HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const {
 
 Task<Expected<>> HTTPServer::handle_https(SocketHandle handle, SSLServerState &https) const {
     /* int h = handle.fileNo(); */
-    co_await co_await doHandleConnection(
-        co_await prepareHTTPS(std::move(handle), https));
+    co_await co_await doHandleConnection(co_await prepareHTTPS(std::move(handle), https));
     /* co_await UringOp().prep_shutdown(h, SHUT_RDWR); */
     co_return {};
 }

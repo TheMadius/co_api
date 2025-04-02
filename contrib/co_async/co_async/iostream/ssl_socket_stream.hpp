@@ -30,6 +30,6 @@ ssl_connect(char const *host, int port, SSLClientTrustAnchor const &ta,
             std::span<char const *const> protocols, std::string_view proxy,
             std::chrono::steady_clock::duration timeout);
 
-Task<OwningStream>
+Task<Expected<OwningStream>>
 ssl_accept(SocketHandle file, SSL_CTX *ctx);
 } // namespace co_async
