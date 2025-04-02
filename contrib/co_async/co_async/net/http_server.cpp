@@ -296,11 +296,11 @@ void HTTPServer::route(HTTPHandler handler) {
 Task<std::shared_ptr<HTTPProtocol>>
 HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
     using namespace std::string_view_literals;
-    auto sock = co_await ssl_accept(std::move(handle), https.ctx);
+    auto sock = co_await ssl_accept(std::move(handle), https.ctx,
+                                                            mImpl->mTimeout);
     if (sock.has_error())
         co_return nullptr;
 
-    sock->timeout(mImpl->mTimeout);
     co_return std::make_shared<HTTPProtocolVersion11>(std::move(*sock));
 }
 

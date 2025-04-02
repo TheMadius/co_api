@@ -596,8 +596,8 @@ public:
         if (buffer.size() == 0)
             co_return {};
 
-        uint64_t send_byte = 0;
         // SSL_write overrides buffer
+        uint64_t send_byte = 0;
         do {
             int sizeUnencryptBytes = SSL_write(ssl_client.get(), buffer.data() + send_byte, buffer.size() - send_byte);
             if (sizeUnencryptBytes <= 0)
@@ -613,7 +613,9 @@ public:
                         co_return CO_ASYNC_ERROR_FORWARD(e);
                 }
                 else
+                {
                     break;
+                }
             } while (true);
         } while (send_byte < buffer.size());
 
@@ -691,8 +693,11 @@ ssl_connect(char const *host, int port, SSLClientTrustAnchor const &ta,
 }
 
 Task<Expected<OwningStream>>
-ssl_accept(SocketHandle file, SSL_CTX *ctx) {
+ssl_accept(SocketHandle file, SSL_CTX *ctx,
+            std::chrono::steady_clock::duration dur) {
     auto ssl_stream = std::make_unique<SSLServerSocketStream>(std::move(file), ctx);
+    ssl_stream->raw_timeout(dur);
+
     auto e = co_await ssl_stream->doSSLHandshake();
     if (e.has_error())
         co_return CO_ASYNC_ERROR_FORWARD(e);
