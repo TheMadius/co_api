@@ -566,9 +566,7 @@ protected:
         [](SSL *ssl)
         {
             if (ssl)
-            {
                 SSL_free(ssl);
-            }
         });
 
         readBIO  = BIO_new(BIO_s_mem());

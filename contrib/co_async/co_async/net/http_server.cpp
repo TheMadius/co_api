@@ -144,10 +144,6 @@ struct HTTPServer::Impl {
         co_return co_await make_error_response(io, 404);
     };
     std::chrono::steady_clock::duration mTimeout = std::chrono::seconds(30);
-#if CO_ASYNC_DEBUG
-    bool mLogRequests = false;
-#endif
-
     Task<Expected<>> doHandleRequest(IO::Ptr &io) const {
         if (auto route = mRoutes.at(io->request.uri.path)) {
             if (!route->checkMethod(io->request.method)) [[unlikely]] {
@@ -169,16 +165,8 @@ struct HTTPServer::Impl {
                     co_await co_await make_error_response(io, 405);
                     co_return {};
                 }
-#if CO_ASYNC_DEBUG
-                auto ret = co_await route.mHandler(io, suffix);
-                if (ret.has_error() && mLogRequests) {
-                    std::clog << "SERVER ERROR: " << ret.error() << '\n';
-                }
-                co_return ret;
-#else
                 co_await co_await route.mHandler(io, suffix);
                 co_return {};
-#endif
             }
         }
         co_await co_await mDefaultRoute(io);
@@ -196,11 +184,6 @@ Task<Expected<bool>> HTTPServer::IO::readRequestHeader() {
 }
 
 Task<Expected<String>> HTTPServer::IO::request_body() {
-#if CO_ASYNC_DEBUG
-    if (mBodyRead) [[unlikely]] {
-        throw std::runtime_error("request_body() may only be called once");
-    }
-#endif
     mBodyRead = true;
     String body;
     if (mHttp)
@@ -209,11 +192,6 @@ Task<Expected<String>> HTTPServer::IO::request_body() {
 }
 
 Task<Expected<>> HTTPServer::IO::request_body_stream(OwningStream &out) {
-#if CO_ASYNC_DEBUG
-    if (mBodyRead) [[unlikely]] {
-        throw std::runtime_error("request_body() may only be called once");
-    }
-#endif
     mBodyRead = true;
     if (mHttp)
         co_await co_await mHttp->readBodyStream(out);
@@ -222,9 +200,6 @@ Task<Expected<>> HTTPServer::IO::request_body_stream(OwningStream &out) {
 
 Task<Expected<>> HTTPServer::IO::response(HTTPResponse resp,
                                           std::string_view content) {
-#if CO_ASYNC_DEBUG
-    mResponseSavedForDebug = resp;
-#endif
     if (!mBodyRead) {
         co_await co_await request_body();
     }
@@ -240,9 +215,6 @@ Task<Expected<>> HTTPServer::IO::response(HTTPResponse resp,
 
 Task<Expected<>> HTTPServer::IO::response(HTTPResponse resp,
                                           OwningStream &body) {
-#if CO_ASYNC_DEBUG
-    mResponseSavedForDebug = resp;
-#endif
     if (!mBodyRead) {
         co_await co_await request_body();
     }
@@ -257,7 +229,7 @@ Task<Expected<>> HTTPServer::IO::response(HTTPResponse resp,
 }
 
 void HTTPServer::IO::builtinHeaders(HTTPResponse &res) {
-    res.headers.insert("server"_s, "co_async/0.0.1"_s);
+    res.headers.insert("server"_s, "evi_http/1.4.1"_s);
     res.headers.insert("accept"_s, "*/*"_s);
     res.headers.insert("accept-ranges"_s, "bytes"_s);
     res.headers.insert("date"_s, httpDateNow());
@@ -266,12 +238,6 @@ void HTTPServer::IO::builtinHeaders(HTTPResponse &res) {
 HTTPServer::HTTPServer() : mImpl(std::make_unique<Impl>()) {}
 
 HTTPServer::~HTTPServer() = default;
-
-#if CO_ASYNC_DEBUG
-void HTTPServer::enableLogRequests() {
-    mImpl->mLogRequests = true;
-}
-#endif
 
 void HTTPServer::timeout(std::chrono::steady_clock::duration timeout) {
     mImpl->mTimeout = timeout;
@@ -301,8 +267,7 @@ void HTTPServer::route(HTTPHandler handler) {
     mImpl->mDefaultRoute = handler;
 }
 
-Task<std::shared_ptr<HTTPProtocol>>
-HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
+auto HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const -> Task<std::shared_ptr<HTTPProtocol>> {
     using namespace std::string_view_literals;
     auto sock = co_await ssl_accept(std::move(handle), https.ctx,
                                                             mImpl->mTimeout);
@@ -313,38 +278,19 @@ HTTPServer::prepareHTTPS(SocketHandle handle, SSLServerState &https) const {
     co_return std::make_shared<HTTPProtocolVersion11>(std::move(*sock));
 }
 
-Task<std::shared_ptr<HTTPProtocol>>
-HTTPServer::prepareHTTP(SocketHandle handle) const {
+auto HTTPServer::prepareHTTP(SocketHandle handle) const -> Task<std::shared_ptr<HTTPProtocol>>{
     auto sock = make_stream<SocketStream>(std::move(handle));
     sock.timeout(mImpl->mTimeout);
     co_return std::make_shared<HTTPProtocolVersion11>(std::move(sock));
 }
 
-Task<Expected<>> HTTPServer::handle_http(SocketHandle handle) const {
-    // #if CO_ASYNC_ALLOC
-    //     std::pmr::unsynchronized_pool_resource pool{currentAllocator};
-    //     ReplaceAllocator _ = &pool;
-    // #endif
-    /* int h = handle.fileNo(); */
-#if CO_ASYNC_DEBUG
-    auto err =
-        co_await doHandleConnection(co_await prepareHTTP(std::move(handle)));
-    if (err.has_error()) [[unlikely]] {
-        std::cerr << err.mErrorLocation.file_name() << ":"
-                  << err.mErrorLocation.line() << ": "
-                  << err.mErrorLocation.function_name() << ": "
-                  << err.error().message() << '\n';
-        co_return err;
-    }
-#else
+auto HTTPServer::handle_http(SocketHandle handle) const -> Task<Expected<>>{
     co_await co_await doHandleConnection(
         co_await prepareHTTP(std::move(handle)));
-#endif
     co_return {};
 }
 
-Task<Expected<>>
-HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const {
+auto HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const -> Task<Expected<>> {
     using namespace std::string_literals;
     auto http = co_await prepareHTTP(std::move(handle));
     while (true) {
@@ -370,65 +316,25 @@ HTTPServer::handle_http_redirect_to_https(SocketHandle handle) const {
     co_return {};
 }
 
-Task<Expected<>> HTTPServer::handle_https(SocketHandle handle, SSLServerState &https) const {
-    /* int h = handle.fileNo(); */
+auto HTTPServer::handle_https(SocketHandle handle, SSLServerState &https) const -> Task<Expected<>> {
     auto sock = co_await prepareHTTPS(std::move(handle), https);
     if (sock)
         co_await co_await doHandleConnection(sock);
-    /* co_await UringOp().prep_shutdown(h, SHUT_RDWR); */
     co_return {};
 }
 
-Task<Expected<>>
-HTTPServer::doHandleConnection(std::shared_ptr<HTTPProtocol> http) const {
+auto HTTPServer::doHandleConnection(std::shared_ptr<HTTPProtocol> http) const -> Task<Expected<>>{
     IO::Ptr io = std::make_shared<IO>(http);
     while (true) {
         if (!co_await co_await io->readRequestHeader()) {
             break;
         }
-#if CO_ASYNC_DEBUG
-        std::chrono::steady_clock::time_point t0;
-        if (mImpl->mLogRequests) {
-            std::clog << io->request.method + ' ' + io->request.uri.dump() + '\n';
-            for (auto [k, v]: io->request.headers) {
-                if (k == "cookie" || k == "set-cookie" ||
-                    k == "authorization") {
-                    v = "*****";
-                }
-                std::clog << "      " + capitalizeHTTPHeader(k) + ": " + v +
-                                 '\n';
-            }
-            t0 = std::chrono::steady_clock::now();
-        }
-#endif
         co_await co_await mImpl->doHandleRequest(io);
-#if CO_ASYNC_DEBUG
-        if (mImpl->mLogRequests) {
-            auto dt = std::chrono::steady_clock::now() - t0;
-            std::clog << io->request.method + ' ' + io->request.uri.dump() + ' ' +
-                             to_string(io->mResponseSavedForDebug.status) + ' ' +
-                             String(getHTTPStatusName(
-                                 io->mResponseSavedForDebug.status)) +
-                             ' ' +
-                             to_string(std::chrono::duration_cast<
-                                           std::chrono::milliseconds>(dt)
-                                           .count()) +
-                             "ms\n";
-            for (auto [k, v]: io->mResponseSavedForDebug.headers) {
-                if (k == "cookie" || k == "set-cookie" ||
-                    k == "authorization") {
-                    v = "*****";
-                }
-                std::clog << "      " + capitalizeHTTPHeader(k) + ": " + v +
-                                 '\n';
-            }
-        }
-#endif
     }
     co_return {};
 }
 
-Task<Expected<>> HTTPServer::make_error_response(IO::Ptr &io, int status) {
+auto HTTPServer::make_error_response(IO::Ptr &io, int status) -> Task<Expected<>> {
     auto error = to_string(status) + ' ' + String(getHTTPStatusName(status));
     HTTPResponse res{
         .status = status,

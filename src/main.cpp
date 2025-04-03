@@ -57,8 +57,9 @@ static Task<Expected<>> amain(std::string serveAt) {
     HTTPServer server;
     server.route([](HTTPServer::IO::Ptr &io) -> Task<Expected<>>
     {
-        auto _body = co_await co_await io->request_body();
-        pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([io]() -> concurrencpp::result<void>
+        auto ctx = io;
+        auto _body = co_await co_await ctx->request_body();
+        pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([ctx]() -> concurrencpp::result<void>
         {
             HTTPResponse res = {
                 .status = 200,
@@ -66,21 +67,13 @@ static Task<Expected<>> amain(std::string serveAt) {
                     {"content-type", "text/html;charset=utf-8"},
                 },
             };
-            std::string_view body = "++";
-            getWorker().spawn(co_bind([_io = io, res, body]() mutable -> Task<Expected<>> {
-                co_await co_await _io->response(res, body);
+            getWorker().spawn(co_bind([ctx, res]() -> Task<Expected<>> {
+                std::string_view body = "++";
+                co_await co_await ctx->response(res, body);
                 co_return {};
             }));
             co_return;
         });
-        // HTTPResponse res = {
-        //     .status = 200,
-        //     .headers = {
-        //         {"content-type", "text/html;charset=utf-8"},
-        //     },
-        // };
-        // std::string_view body = "++";
-        // co_await co_await io->response(res, body);
         co_return {};
     });
 
