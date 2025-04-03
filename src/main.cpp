@@ -57,7 +57,7 @@ static Task<Expected<>> amain(std::string serveAt) {
     HTTPServer server;
     server.route([](HTTPServer::IO::Ptr &io) -> Task<Expected<>>
     {
-        // auto _body = co_await co_await io->request_body();
+        auto _body = co_await co_await io->request_body();
         pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([io]() -> concurrencpp::result<void>
         {
             HTTPResponse res = {
@@ -73,6 +73,14 @@ static Task<Expected<>> amain(std::string serveAt) {
             }));
             co_return;
         });
+        // HTTPResponse res = {
+        //     .status = 200,
+        //     .headers = {
+        //         {"content-type", "text/html;charset=utf-8"},
+        //     },
+        // };
+        // std::string_view body = "++";
+        // co_await co_await io->response(res, body);
         co_return {};
     });
 
@@ -106,7 +114,7 @@ int main(int argc, char **argv)
         }
         pool::ThreadPoolManager::GetInstance()->Init(count_thread);
     }
-    std::string serveAt = "127.0.0.1:8080";
+    std::string serveAt = "0.0.0.0:8080";
     if (argc > 1) {
         serveAt = argv[1];
     }
