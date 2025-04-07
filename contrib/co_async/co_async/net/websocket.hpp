@@ -44,14 +44,15 @@ inline std::string websocketSecretHash(std::string userKey) {
     return base64::encode_into<std::string>(buf, buf + hash::SHA1::HashBytes);
 }
 
-inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO &io) {
-    if (io.request.headers.get("upgrade") != "websocket") {
+inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO::Ptr &io)
+{
+    if (io->request.headers.get("upgrade") != "websocket") {
         co_return false;
     }
     // 是 ws:// 请求
-    auto wsKey = io.request.headers.get("sec-websocket-key");
+    auto wsKey = io->request.headers.get("sec-websocket-key");
     if (!wsKey) {
-        co_await co_await HTTPServerUtils::make_error_response(io, 400);
+        co_await co_await HTTPServerUtils::make_error_response(*io, 400);
         co_return true;
     }
     auto wsNewKey = websocketSecretHash(*wsKey);
@@ -64,7 +65,7 @@ inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO &io) {
             {"sec-websocket-accept", wsNewKey},
         },
     };
-    co_await co_await io.response(res, "");
+    co_await co_await io->response(res, "");
     co_return true;
 }
 
@@ -283,9 +284,9 @@ struct WebSocket {
     }
 };
 
-inline Task<Expected<WebSocket>> websocket_server(HTTPServer::IO &io) {
+inline Task<Expected<WebSocket>> websocket_server(HTTPServer::IO::Ptr &io) {
     if (co_await co_await httpUpgradeToWebSocket(io)) {
-        co_return WebSocket(io.extractSocket());
+        co_return WebSocket(io->extractSocket());
     }
     co_return std::errc::protocol_error;
 }
