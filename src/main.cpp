@@ -93,7 +93,7 @@ static Task<Expected<>> amain(std::string serveAt) {
                     },
                 };
                 std::string_view body = "++";
-                co_await co_await ctx->response(res, body);
+                co_awaits ctx->response(res, body);
                 co_return {};
             }));
             co_return;
@@ -106,14 +106,12 @@ static Task<Expected<>> amain(std::string serveAt) {
     }
 
     SSLServerState ssl;
-    ssl.initSSLctx("./cert/server.crt", "./cert/server.key");
+    ssl.initSSLctx("../cert/server.crt", "../cert/server.key");
 
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
-            getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>>
-            {
-                co_await co_await server.handle_https(std::move(*income), ssl);
-                co_return {};
+            getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>> {
+                co_return co_await server.handle_https(std::move(*income), ssl);;
             }));
         }
     }
