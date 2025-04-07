@@ -15,6 +15,11 @@ struct Worker {
     std::mutex mtx;
     std::jthread th;
 
+    auto getId()
+    {
+        return th.get_id();
+    }
+
     void spawn(Task<Expected<>> task) {
         std::lock_guard lck(mtx);
         q.push_back(std::move(task));
@@ -44,9 +49,27 @@ struct Worker {
 
 std::vector<Worker> workers(std::thread::hardware_concurrency());
 
+int getIndex(std::thread::id id)
+{
+    auto current_poller = std::find_if(workers.begin(), workers.end(), [&](auto &it)
+    {
+        return id == it.getId();
+    });
+    if (current_poller == workers.end())
+        return -1;
+
+    auto idx = std::distance(workers.begin(), current_poller);
+    return idx;
+}
+
 Worker &getWorker()
 {
     static std::atomic_int64_t i = 0;
+    return workers[(i++)%16];
+}
+
+Worker &getWorker(int i)
+{
     return workers[(i++)%16];
 }
 
@@ -58,16 +81,17 @@ static Task<Expected<>> amain(std::string serveAt) {
     server.route([](HTTPServer::IO::Ptr &io) -> Task<Expected<>>
     {
         auto ctx = io;
+        auto index_thread = getIndex(std::this_thread::get_id());
         auto _body = co_await co_await ctx->request_body();
-        pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([ctx]() -> concurrencpp::result<void>
+        pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([ctx, index_thread]() -> concurrencpp::result<void>
         {
-            HTTPResponse res = {
-                .status = 200,
-                .headers = {
-                    {"content-type", "text/html;charset=utf-8"},
-                },
-            };
-            getWorker().spawn(co_bind([ctx, res]() -> Task<Expected<>> {
+            getWorker(index_thread).spawn(co_bind([ctx]() -> Task<Expected<>> {
+                HTTPResponse res = {
+                    .status = 200,
+                    .headers = {
+                        {"content-type", "text/html;charset=utf-8"},
+                    },
+                };
                 std::string_view body = "++";
                 co_await co_await ctx->response(res, body);
                 co_return {};
@@ -89,7 +113,6 @@ static Task<Expected<>> amain(std::string serveAt) {
             getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>>
             {
                 co_await co_await server.handle_https(std::move(*income), ssl);
-                // co_await co_await server.handle_http(std::move(*income));
                 co_return {};
             }));
         }
