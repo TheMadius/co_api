@@ -77,8 +77,8 @@ struct HTTPServer {
     Task<Expected<>> handle_http(SocketHandle handle) const;
     Task<Expected<>> handle_http_redirect_to_https(SocketHandle handle) const;
     Task<Expected<>> handle_https(SocketHandle handle, SSLServerState &https) const;
-    Task<Expected<>>
-    doHandleConnection(std::shared_ptr<HTTPProtocol> http) const;
+    auto doHandleConnection(std::shared_ptr<HTTPProtocol> http) const -> Task<Expected<>>;
+    auto doHandleConnection(IO::Ptr io) const -> Task<Expected<>>;
     static Task<Expected<>> make_error_response(IO::Ptr &io, int status);
 
 private:
