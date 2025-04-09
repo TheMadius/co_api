@@ -82,16 +82,16 @@ static Task<Expected<>> amain(std::string serveAt) {
     {
         if (auto ws = co_await websocket_server(io)) {
             co_await co_await stdio().putline("Connection"sv);
-            ws->on_message([&] (std::string const &message) -> Task<Expected<>> {
+            ws->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>> {
                 co_await co_await stdio().putline("message received: "s + message);
-                co_await co_await ws->send("Got it! "s + message);
+                co_await co_await ws.send("Got it! "s + message);
                 co_return {};
             });
-            ws->on_close([&] () -> Task<Expected<>> {
+            ws->on_close([] (co_async::WebSocket &ws) -> Task<Expected<>> {
                 co_await co_await stdio().putline("Closing connection"sv);
                 co_return {};
             });
-            ws->on_pong([&] (std::chrono::steady_clock::duration dt) -> Task<Expected<>> {
+            ws->on_pong([] (co_async::WebSocket &ws, std::chrono::steady_clock::duration dt) -> Task<Expected<>> {
                 co_await co_await stdio().putline("network delay: "s + to_string(
                     std::chrono::duration_cast<std::chrono::milliseconds>(dt).count()) + "ms"s);
                 co_return {};

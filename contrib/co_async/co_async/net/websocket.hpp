@@ -175,9 +175,9 @@ inline Task<Expected<>> wsSendPacket(BorrowedStream &ws, WebSocketPacket packet,
 
 struct WebSocket {
     BorrowedStream &sock;
-    std::function<Task<Expected<>>(std::string const &)> mOnMessage;
-    std::function<Task<Expected<>>()> mOnClose;
-    std::function<Task<Expected<>>(std::chrono::steady_clock::duration)> mOnPong;
+    std::function<Task<Expected<>>(WebSocket &, std::string const &)> mOnMessage;
+    std::function<Task<Expected<>>(WebSocket &)> mOnClose;
+    std::function<Task<Expected<>>(WebSocket &,std::chrono::steady_clock::duration)> mOnPong;
     bool mHalfClosed = false;
     bool mWaitingPong = true;
     std::chrono::steady_clock::time_point mLastPingTime{};
@@ -191,15 +191,15 @@ struct WebSocket {
         return mHalfClosed;
     }
 
-    void on_message(std::function<Task<Expected<>>(std::string const &)> onMessage) {
+    void on_message(std::function<Task<Expected<>>(WebSocket &, std::string const &)> onMessage) {
         mOnMessage = std::move(onMessage);
     }
 
-    void on_close(std::function<Task<Expected<>>()> onClose) {
+    void on_close(std::function<Task<Expected<>>(WebSocket &)> onClose) {
         mOnClose = std::move(onClose);
     }
 
-    void on_pong(std::function<Task<Expected<>>(std::chrono::steady_clock::duration)> onPong) {
+    void on_pong(std::function<Task<Expected<>>(WebSocket &,std::chrono::steady_clock::duration)> onPong) {
         mOnPong = std::move(onPong);
     }
 
@@ -252,24 +252,20 @@ struct WebSocket {
             auto packet = co_await std::move(maybePacket);
             if (packet.opcode == packet.kOpcodeText || packet.opcode == packet.kOpcodeBinary) {
                 if (mOnMessage) {
-                    co_await co_await mOnMessage(packet.content);
+                    co_await co_await mOnMessage(*this, packet.content);
                 }
             } else if (packet.opcode == packet.kOpcodePing) {
-                // debug(), "收到ping";
                 packet.opcode = packet.kOpcodePong;
                 co_await co_await wsSendPacket(sock, packet);
             } else if (packet.opcode == packet.kOpcodePong) {
                 auto now = std::chrono::steady_clock::now();
                 if (mOnPong && mLastPingTime.time_since_epoch().count() != 0) {
                     auto dt = now - mLastPingTime;
-                    co_await co_await mOnPong(dt);
-                    // debug(), "网络延迟:", dt;
+                    co_await co_await mOnPong(*this, dt);
                 }
-                // debug(), "收到pong";
             } else if (packet.opcode == packet.kOpcodeClose) {
-                // debug(), "收到关闭请求";
                 if (mOnClose) {
-                    co_await co_await mOnClose();
+                    co_await co_await mOnClose(*this);
                 }
                 if (!mHalfClosed) {
                     co_await co_await wsSendPacket(sock, packet);
