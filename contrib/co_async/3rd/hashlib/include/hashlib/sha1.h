@@ -9,8 +9,7 @@
 #include <string>
 #include <cstdint>
 
-namespace hash
-{
+
 /// compute SHA1 hash
 /** Usage:
     SHA1 sha1;
@@ -391,5 +390,4 @@ std::string SHA1::operator()(const std::string& text)
   reset();
   add(text.c_str(), text.size());
   return getHash();
-}
 }

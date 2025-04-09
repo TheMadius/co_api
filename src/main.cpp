@@ -78,46 +78,61 @@ static Task<Expected<>> amain(std::string serveAt) {
     auto listener = co_await co_await listener_bind(co_await AddressResolver().host(serveAt).resolve_one());
 
     HTTPServer server;
-    server.route([](HTTPServer::IO::Ptr &io) -> Task<Expected<>>
+    server.route([](HTTPServer::IO &ctx) -> Task<Expected<>>
     {
-        if (auto ws = co_await websocket_server(io)) {
+        if (auto ws = co_await websocket_server(ctx))
+        {
             co_await co_await stdio().putline("Connection"sv);
-            ws->on_message([&] (std::string const &message) -> Task<Expected<>> {
+            ws->on_message([&] (std::string const &message) -> Task<Expected<>>
+            {
                 co_await co_await stdio().putline("message received: "s + message);
                 co_await co_await ws->send("Got it! "s + message);
                 co_return {};
             });
-            ws->on_close([&] () -> Task<Expected<>> {
+
+            ws->on_close([&] () -> Task<Expected<>>
+            {
                 co_await co_await stdio().putline("Closing connection"sv);
                 co_return {};
             });
-            ws->on_pong([&] (std::chrono::steady_clock::duration dt) -> Task<Expected<>> {
+
+            ws->on_pong([&] (std::chrono::steady_clock::duration dt) -> Task<Expected<>> 
+            {
                 co_await co_await stdio().putline("network delay: "s + to_string(
                     std::chrono::duration_cast<std::chrono::milliseconds>(dt).count()) + "ms"s);
                 co_return {};
             });
-            co_await co_await ws->start();
+            co_await co_await ws->start(std::chrono::seconds(15));
         }
         else
         {
-            auto ctx = io;
             auto index_thread = getIndex(std::this_thread::get_id());
-            auto _body = co_await co_await ctx->request_body();
-            pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([ctx, index_thread]() -> concurrencpp::result<void>
-            {
-                getWorker(index_thread).spawn(co_bind([ctx]() -> Task<Expected<>> {
-                    HTTPResponse res = {
-                        .status = 200,
-                        .headers = {
-                            {"content-type", "text/html;charset=utf-8"},
-                        },
-                    };
-                    std::string_view body = "++";
-                    co_awaits ctx->response(res, body);
-                    co_return {};
-                }));
-                co_return;
-            });
+            auto _body = co_await co_await ctx.request_body();
+            // pool::ThreadPoolManager::GetInstance()->getThreadPool()->submit([ctx, index_thread]() -> concurrencpp::result<void>
+            // {
+            //     getWorker(index_thread).spawn(co_bind([ctx]() -> Task<Expected<>> {
+            //         HTTPResponse res = {
+            //             .status = 200,
+            //             .headers = {
+            //                 {"content-type", "text/html;charset=utf-8"},
+            //             },
+            //         };
+            //         std::string_view body = "++";
+            //         co_awaits ctx->response(res, body);
+            //         co_return {};
+            //     }));
+            //     co_return;
+            // });
+
+            HTTPResponse res = {
+                .status = 200,
+                .headers = {
+                    {"content-type", "text/html;charset=utf-8"},
+                },
+            };
+            std::string_view body = "++";
+            co_awaits ctx.response(res, body);
+            co_return {};
         }
         co_return {};
     });
@@ -132,7 +147,7 @@ static Task<Expected<>> amain(std::string serveAt) {
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
             getWorker().spawn(co_bind([income = std::move(income), &server, &ssl]() mutable -> Task<Expected<>> {
-                co_return co_await server.handle_https(std::move(*income), ssl);;
+                co_return co_await server.handle_https(std::move(*income), ssl);
             }));
         }
     }

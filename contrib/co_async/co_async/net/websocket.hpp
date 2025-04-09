@@ -36,23 +36,22 @@ inline std::string websocketGenerateNonce() {
 
 inline std::string websocketSecretHash(std::string userKey) {
     // websocket 官方要求的神秘仪式
-    hash::SHA1 sha1;
+    class SHA1 sha1;
     std::string inKey = userKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     sha1.add(inKey.data(), inKey.size());
-    uint8_t buf[hash::SHA1::HashBytes];
+    uint8_t buf[SHA1::HashBytes];
     sha1.getHash(buf);
-    return base64::encode_into<std::string>(buf, buf + hash::SHA1::HashBytes);
+    return base64::encode_into<std::string>(buf, buf + SHA1::HashBytes);
 }
 
-inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO::Ptr &io)
-{
-    if (io->request.headers.get("upgrade") != "websocket") {
+inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO &io) {
+    if (io.request.headers.get("upgrade") != "websocket") {
         co_return false;
     }
     // 是 ws:// 请求
-    auto wsKey = io->request.headers.get("sec-websocket-key");
+    auto wsKey = io.request.headers.get("sec-websocket-key");
     if (!wsKey) {
-        co_await co_await HTTPServerUtils::make_error_response(*io, 400);
+        co_await co_await HTTPServerUtils::make_error_response(io, 400);
         co_return true;
     }
     auto wsNewKey = websocketSecretHash(*wsKey);
@@ -65,7 +64,7 @@ inline Task<Expected<bool>> httpUpgradeToWebSocket(HTTPServer::IO::Ptr &io)
             {"sec-websocket-accept", wsNewKey},
         },
     };
-    co_await co_await io->response(res, "");
+    co_await co_await io.response(res, "");
     co_return true;
 }
 
@@ -284,9 +283,9 @@ struct WebSocket {
     }
 };
 
-inline Task<Expected<WebSocket>> websocket_server(HTTPServer::IO::Ptr &io) {
+inline Task<Expected<WebSocket>> websocket_server(HTTPServer::IO &io) {
     if (co_await co_await httpUpgradeToWebSocket(io)) {
-        co_return WebSocket(io->extractSocket());
+        co_return WebSocket(io.extractSocket());
     }
     co_return std::errc::protocol_error;
 }
@@ -311,5 +310,4 @@ inline Task<Expected<WebSocket>> websocket_client(HTTPConnection &conn, URI uri)
     }
     co_return WebSocket(conn.extractSocket());
 }
-
 }

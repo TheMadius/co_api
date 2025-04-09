@@ -2,7 +2,6 @@
 #include <co_async/std.hpp>
 #include <co_async/awaiter/task.hpp>
 #include <co_async/iostream/socket_stream.hpp>
-#include <co_async/iostream/ssl_socket_stream.hpp>
 #include <co_async/net/http_protocol.hpp>
 #include <co_async/net/http_string_utils.hpp>
 #include <co_async/net/uri.hpp>
@@ -11,7 +10,8 @@
 #include <co_async/platform/socket.hpp>
 #include <co_async/utils/simple_map.hpp>
 #include <co_async/utils/string_utils.hpp>
-#include <memory>
+
+struct ssl_ctx_st;
 
 namespace co_async {
 enum class HTTPRouteMode {
@@ -23,15 +23,14 @@ enum class HTTPRouteMode {
 struct SSLServerState {
     void initSSLctx(std::string path_crt, std::string path_key, std::string pem = "");
 
-    SSL_CTX* ctx = NULL;
+    struct ssl_ctx_st* ctx = NULL;
 
     ~SSLServerState();
 };
 
 struct HTTPServer {
     struct IO {
-        using Ptr = std::shared_ptr<IO>;
-        explicit IO(std::shared_ptr<HTTPProtocol> &http) noexcept : mHttp(std::move(http)) {}
+        explicit IO(HTTPProtocol *http) noexcept : mHttp(http) {}
 
         HTTPRequest request;
         Task<Expected<bool>> readRequestHeader();
@@ -45,7 +44,7 @@ struct HTTPServer {
         }
 
     private:
-        std::shared_ptr<HTTPProtocol> mHttp;
+        HTTPProtocol *mHttp;
         bool mBodyRead = false;
 #if CO_ASYNC_DEBUG
         HTTPResponse mResponseSavedForDebug{};
@@ -54,11 +53,11 @@ struct HTTPServer {
         void builtinHeaders(HTTPResponse &res);
     };
 
-    using HTTPHandler = std::function<Task<Expected<>>(IO::Ptr &)>;
+    using HTTPHandler = std::function<Task<Expected<>>(IO &)>;
     using HTTPPrefixHandler =
-        std::function<Task<Expected<>>(IO::Ptr &, std::string_view)>;
-    /* using HTTPHandler = Task<Expected<>>(*)(IO::Ptr &); */
-    /* using HTTPPrefixHandler = Task<Expected<>>(*)(IO::Ptr &, std::string_view); */
+        std::function<Task<Expected<>>(IO &, std::string_view)>;
+    /* using HTTPHandler = Task<Expected<>>(*)(IO &); */
+    /* using HTTPPrefixHandler = Task<Expected<>>(*)(IO &, std::string_view); */
     HTTPServer();
     ~HTTPServer();
     HTTPServer(HTTPServer &&) = delete;
@@ -71,15 +70,16 @@ struct HTTPServer {
     void route(std::string_view methods, std::string_view prefix,
                HTTPRouteMode mode, HTTPPrefixHandler handler);
     void route(HTTPHandler handler);
-    Task<std::shared_ptr<HTTPProtocol>>
+    Task<std::unique_ptr<HTTPProtocol>>
     prepareHTTPS(SocketHandle handle, SSLServerState &https) const;
-    Task<std::shared_ptr<HTTPProtocol>> prepareHTTP(SocketHandle handle) const;
+    Task<std::unique_ptr<HTTPProtocol>> prepareHTTP(SocketHandle handle) const;
     Task<Expected<>> handle_http(SocketHandle handle) const;
     Task<Expected<>> handle_http_redirect_to_https(SocketHandle handle) const;
-    Task<Expected<>> handle_https(SocketHandle handle, SSLServerState &https) const;
-    auto doHandleConnection(std::shared_ptr<HTTPProtocol> http) const -> Task<Expected<>>;
-    auto doHandleConnection(IO::Ptr io) const -> Task<Expected<>>;
-    static Task<Expected<>> make_error_response(IO::Ptr &io, int status);
+    Task<Expected<>> handle_https(SocketHandle handle,
+                                  SSLServerState &https) const;
+    Task<Expected<>>
+    doHandleConnection(std::unique_ptr<HTTPProtocol> http) const;
+    static Task<Expected<>> make_error_response(IO &io, int status);
 
 private:
     struct Impl;
