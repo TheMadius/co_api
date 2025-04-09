@@ -156,7 +156,6 @@ if (NOT HAS_SYMMETRIC_COROUTINE)
     message(FATAL_ERROR "Your compiler doesn't support symmetric coroutine transfer")
 endif()
 
-
 add_library(co_async STATIC)
 file(GLOB_RECURSE interface_sources co_async/*.hpp)
 file(GLOB_RECURSE implementation_sources co_async/*.cpp)
@@ -226,9 +225,6 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     endif()
 endif()
 target_include_directories(co_async PUBLIC 3rd/hashlib/include)
-
-add_subdirectory(3rd/bearssl)
-target_link_libraries(co_async PUBLIC bearssl)
 
 find_package(Threads REQUIRED)
 target_link_libraries(co_async PUBLIC Threads::Threads)

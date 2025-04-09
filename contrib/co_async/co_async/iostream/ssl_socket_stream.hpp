@@ -10,26 +10,10 @@
 #include <co_async/utils/pimpl.hpp>
 
 namespace co_async {
-std::error_category const &bearSSLCategory();
+auto ssl_connect(char const *host, int port,
+            SSL_CTX *ctx, std::string_view proxy,
+            std::chrono::steady_clock::duration timeout) -> Task<Expected<OwningStream>>;
 
-StructPImpl(SSLClientTrustAnchor) {
-    Expected<> add(std::string_view content);
-};
-
-StructPImpl(SSLServerPrivateKey) {
-    Expected<> set(std::string_view content);
-};
-
-StructPImpl(SSLServerCertificate) {
-    Expected<> add(std::string_view content);
-};
-
-StructPImpl(SSLServerSessionCache){};
-Task<Expected<OwningStream>>
-ssl_connect(char const *host, int port, SSLClientTrustAnchor const &ta,
-            std::span<char const *const> protocols, std::string_view proxy,
-            std::chrono::steady_clock::duration timeout);
-
-Task<Expected<OwningStream>>
-ssl_accept(SocketHandle file, SSL_CTX *ctx, std::chrono::steady_clock::duration dur);
+auto ssl_accept(SocketHandle file, SSL_CTX *ctx,
+                std::chrono::steady_clock::duration dur) -> Task<Expected<OwningStream>>;
 } // namespace co_async

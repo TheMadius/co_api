@@ -17,6 +17,41 @@
 #include <co_async/utils/string_utils.hpp>
 
 namespace co_async {
+
+#define CERT_FILE "/etc/ssl/certs/ca-certificates.crt"
+
+struct SSLClientState
+{
+    SSL_CTX* ctx = NULL;
+
+    void initSSLctx()
+    {
+        const SSL_METHOD* method;
+
+        method = TLS_client_method();
+
+        ctx = SSL_CTX_new(method);
+        if (!ctx) {
+            perror("Unable to create SSL context");
+            exit(EXIT_FAILURE);
+        }
+
+        const long flags = SSL_EXT_TLS1_3_ONLY;
+        SSL_CTX_set_options(ctx, flags);
+
+        /* Set the key and cert */
+        if (SSL_CTX_use_certificate_file(ctx, CERT_FILE, SSL_FILETYPE_PEM) <= 0) {
+            ERR_print_errors_fp(stderr);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    ~SSLClientState()
+    {
+        SSL_CTX_free(ctx);
+    }
+};
+
 struct HTTPConnection {
 private:
     struct HTTPProtocolFactory {
@@ -49,27 +84,20 @@ private:
     struct HTTPProtocolFactoryHTTPS : HTTPProtocolFactory {
         using HTTPProtocolFactory::HTTPProtocolFactory;
 
-        static PImpl<SSLClientTrustAnchor> &trustAnchors() {
-            static PImpl<SSLClientTrustAnchor> instance;
+        static SSLClientState &trustAnchors() {
+            static SSLClientState instance;
             return instance;
         }
 
         Task<Expected<std::unique_ptr<HTTPProtocol>>>
         createConnection() override {
             static CallOnce taInitializeOnce;
-            static char const *const protocols[] = {
-                /* "h2", */
-                "http/1.1",
-            };
             if (auto locked = co_await taInitializeOnce.call_once()) {
-                auto path = make_path("/etc/ssl/certs/ca-certificates.crt");
-                auto content = co_await co_await file_read(path);
-                co_await trustAnchors().add(content);
+                trustAnchors().initSSLctx();
                 locked.set_ready();
             }
             auto sock = co_await co_await ssl_connect(mHost.c_str(), mPort,
-                                                      trustAnchors(), protocols,
-                                                      mProxy, mTimeout);
+                                                      trustAnchors().ctx, mProxy, mTimeout);
             co_return std::make_unique<HTTPProtocolVersion11>(std::move(sock));
         }
     };
