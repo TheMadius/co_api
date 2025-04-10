@@ -96,6 +96,8 @@ public:
 
     Task<Expected<>> raw_flush() override
     {
+        BIO_reset(writeBIO);
+        BIO_reset(readBIO);
         co_return {};
     }
 

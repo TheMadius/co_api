@@ -96,7 +96,7 @@ static Task<Expected<>> curl() {
 }
 
 static Task<Expected<>> amain(std::string serveAt) {
-    co_awaits curl();
+    co_spawn(curl());
     co_await co_await stdio().putline("listening at: "s + serveAt);
     auto listener = co_await co_await listener_bind(co_await AddressResolver().host(serveAt).resolve_one());
 
