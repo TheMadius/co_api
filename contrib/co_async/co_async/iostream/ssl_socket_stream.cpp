@@ -158,6 +158,9 @@ public:
                         else
                             co_return std::errc::broken_pipe;
                     }
+                    size_t sendBytes = *e;
+                    if (sendBytes == 0)
+                        co_return std::errc::broken_pipe;
                 }
                 else
                 {
