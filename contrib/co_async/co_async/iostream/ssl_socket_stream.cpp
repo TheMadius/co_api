@@ -34,10 +34,8 @@ private:
 
     Task<Expected<>> doSSLHandshake()
     {
-        int count = 0;
         while (!SSL_is_init_finished(ssl_client.get()))
         {
-            if (++count >= 5000) co_return std::errc::broken_pipe;
             SSL_do_handshake(ssl_client.get());
             int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
             if (bytesToWrite > 0)
@@ -65,6 +63,9 @@ private:
                 if (receivedBytes > 0) {
                     BIO_write(readBIO, _buffer.get(), receivedBytes);
                 }
+
+                if (receivedBytes == 0)
+                    co_return std::errc::broken_pipe;
             }
         }
         co_return {};
@@ -101,7 +102,7 @@ public:
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
         // SSL_read overrides buffer
-        while (true)
+        while (raw.get())
         {
             int sizeUnencryptBytes = SSL_read(ssl_client.get(), buffer.data(), buffer.size());
             if (sizeUnencryptBytes < 0)
@@ -125,7 +126,11 @@ public:
             size_t receivedBytes = *(e);
             if (receivedBytes > 0)
                 BIO_write(readBIO, _buffer.get(), receivedBytes);
+
+            if (receivedBytes == 0)
+                co_return std::errc::broken_pipe;
         }
+        co_return 0;
     }
 
     Task<Expected<std::size_t>> raw_write(std::span<char const> buffer) override
