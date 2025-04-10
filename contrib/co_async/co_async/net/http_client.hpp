@@ -26,24 +26,32 @@ struct SSLClientState
 
     void initSSLctx()
     {
-        const SSL_METHOD* method;
+        static int s_initialized = 0;
+        if (s_initialized == 0)
+        {
+    #if OPENSSL_VERSION_NUMBER < 0x10100000L
+            SSL_library_init();
+            SSL_load_error_strings();
+    #else
+            OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT, NULL);
+    #endif
+            s_initialized = 1;
+        }
 
-        method = TLS_client_method();
-
-        ctx = SSL_CTX_new(method);
+    #if OPENSSL_VERSION_NUMBER < 0x10100000L
+        ctx = SSL_CTX_new(SSLv23_method());
+    #else
+        ctx = SSL_CTX_new(TLS_method());
+    #endif
         if (!ctx) {
-            perror("Unable to create SSL context");
-            exit(EXIT_FAILURE);
+            throw std::runtime_error("Unable to create SSL context");
         }
+        int mode = SSL_VERIFY_NONE;
 
-        const long flags = SSL_EXT_TLS1_3_ONLY;
-        SSL_CTX_set_options(ctx, flags);
-
-        /* Set the key and cert */
-        if (SSL_CTX_use_certificate_file(ctx, CERT_FILE, SSL_FILETYPE_PEM) <= 0) {
-            ERR_print_errors_fp(stderr);
-            exit(EXIT_FAILURE);
-        }
+    #ifdef SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
+        SSL_CTX_set_mode(ctx, SSL_CTX_get_mode(ctx) | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    #endif
+        SSL_CTX_set_verify(ctx, mode, NULL);
     }
 
     ~SSLClientState()
@@ -96,8 +104,8 @@ private:
                 trustAnchors().initSSLctx();
                 locked.set_ready();
             }
-            auto sock = co_await co_await ssl_connect(mHost.c_str(), mPort,
-                                                      trustAnchors().ctx, mProxy, mTimeout);
+            auto sock = co_await co_await ssl_connect(mHost.c_str(), mPort, trustAnchors().ctx,
+                                                         mProxy, mTimeout);
             co_return std::make_unique<HTTPProtocolVersion11>(std::move(sock));
         }
     };

@@ -73,7 +73,30 @@ Worker &getWorker(int i)
     return workers[(i++)%16];
 }
 
+static Task<Expected<>> curl() {
+    HTTPConnectionPool pool;
+    std::vector<Task<Expected<>>> res;
+    for (std::string path: {"cameras"}) {
+        res.push_back(co_bind([&, path] () -> Task<Expected<>> {
+            auto conn = co_await co_await pool.connect("https://10.23.18.4:10001");
+            HTTPRequest req = {
+                .method = "GET",
+                .uri = URI::parse("/" + path),
+            };
+            debug(), "requesting", req;
+            auto [res, body] = co_await co_await conn->request_streamed(req, {});
+            debug(), "res", res;
+            auto content = co_await co_await body.getall();
+            debug(), "body", content;
+            co_return {};
+        }));
+    }
+    co_await co_await when_all(res);
+    co_return {};
+}
+
 static Task<Expected<>> amain(std::string serveAt) {
+    co_awaits curl();
     co_await co_await stdio().putline("listening at: "s + serveAt);
     auto listener = co_await co_await listener_bind(co_await AddressResolver().host(serveAt).resolve_one());
 

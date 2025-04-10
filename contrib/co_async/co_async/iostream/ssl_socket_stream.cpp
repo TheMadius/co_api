@@ -100,28 +100,32 @@ public:
 
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
-        auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
-        if (!e)
-        {
-            if (e.has_error())
-                co_return CO_ASYNC_ERROR_FORWARD(e);
-            else
-                co_return std::errc::broken_pipe;
-        }
-
-        size_t receivedBytes = *(e);
-        if (receivedBytes <= 0)
-            co_return 0;
-
-        BIO_write(readBIO, _buffer.get(), receivedBytes);
-
         // SSL_read overrides buffer
-        int sizeUnencryptBytes = SSL_read(ssl_client.get(), _buffer.get(), receivedBytes);
-        if (sizeUnencryptBytes < 0)
-            co_return 0;
+        while (true)
+        {
+            int sizeUnencryptBytes = SSL_read(ssl_client.get(), buffer.data(), buffer.size());
+            if (sizeUnencryptBytes < 0)
+                switch (int err = SSL_get_error(ssl_client.get(), sizeUnencryptBytes)) {
+                    case SSL_ERROR_WANT_READ:
+                        break;
+                    default:
+                        co_return 0;
+                }
+            else
+                co_return sizeUnencryptBytes;
 
-        memcpy(buffer.data(), _buffer.get(), sizeUnencryptBytes);
-        co_return sizeUnencryptBytes;
+            auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
+            if (!e)
+            {
+                if (e.has_error())
+                    co_return CO_ASYNC_ERROR_FORWARD(e);
+                else
+                    co_return std::errc::broken_pipe;
+            }
+            size_t receivedBytes = *(e);
+            if (receivedBytes > 0)
+                BIO_write(readBIO, _buffer.get(), receivedBytes);
+        }
     }
 
     Task<Expected<std::size_t>> raw_write(std::span<char const> buffer) override
@@ -195,6 +199,7 @@ public:
         auto ssl = SSL_new(ctx);
         if (ssl == NULL)
             throw std::logic_error("Error create ssl client");
+        SSL_set_tlsext_host_name(ssl, host);
         setSSL(ssl, true);
     }
 
