@@ -73,6 +73,46 @@ Worker &getWorker(int i)
     return workers[(i++)%16];
 }
 
+Task<Expected<>> ws_connect()
+{
+    HTTPConnectionPool pool;
+    auto conn = co_await co_await pool.connect("https://192.168.0.106:19999");
+    auto ws_connect = co_await co_await co_async::websocket_client(*conn, {"/"}, {{"X-Vsaas-Api-Key"s, "000000"s}});
+
+    ws_connect->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>>
+    {
+        co_await co_await stdio().putline("message received: "s + message);
+        co_return {};
+    });
+
+    ws_connect->on_close([] (co_async::WebSocket &ws) -> Task<Expected<>>
+    {
+        co_await co_await stdio().putline("Closing connection"sv);
+        co_return {};
+    });
+
+    ws_connect->on_pong([] (co_async::WebSocket &ws, std::chrono::steady_clock::duration dt) -> Task<Expected<>>
+    {
+        co_await co_await stdio().putline("network delay: "s + to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(dt).count()) + "ms"s);
+        co_return {};
+    });
+
+    std::weak_ptr ws_weak = ws_connect;
+    co_spawn(co_bind([ws_weak]() -> Task<Expected<>>
+    {
+        while (auto strong_ws = ws_weak.lock())
+        {
+            co_await strong_ws->send("popopopopopopop");
+        }
+        co_return {};
+    }));
+
+    co_await co_await ws_connect->start();
+    co_return {};
+}
+
+
 static Task<Expected<>> curl() {
     HTTPConnectionPool pool;
     std::vector<Task<Expected<>>> res;
@@ -96,7 +136,7 @@ static Task<Expected<>> curl() {
 }
 
 static Task<Expected<>> amain(std::string serveAt) {
-    co_spawn(curl());
+    co_await ws_connect();
     co_await co_await stdio().putline("listening at: "s + serveAt);
     auto listener = co_await co_await listener_bind(co_await AddressResolver().host(serveAt).resolve_one());
 

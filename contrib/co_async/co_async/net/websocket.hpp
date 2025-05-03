@@ -173,18 +173,40 @@ inline Task<Expected<>> wsSendPacket(BorrowedStream &ws, WebSocketPacket packet,
     co_return {};
 }
 
-struct WebSocket {
+struct WebSocket : public std::enable_shared_from_this<WebSocket>
+{
+    using Ptr = std::shared_ptr<WebSocket>;
+
     BorrowedStream &sock;
-    std::function<Task<Expected<>>(WebSocket &, std::string const &)> mOnMessage;
     std::function<Task<Expected<>>(WebSocket &)> mOnClose;
+    std::function<Task<Expected<>>(WebSocket &, std::string const &)> mOnMessage;
     std::function<Task<Expected<>>(WebSocket &,std::chrono::steady_clock::duration)> mOnPong;
+
+    co_async::Mutex<> _mtx;
     bool mHalfClosed = false;
     bool mWaitingPong = true;
     std::chrono::steady_clock::time_point mLastPingTime{};
 
-    WebSocket(WebSocket &&) = default;
+    WebSocket(WebSocket &&other) : sock(other.sock)
+    {
+        mOnPong = std::move(other.mOnPong);
+        mOnClose = std::move(other.mOnClose);
+        mOnMessage = std::move(other.mOnMessage);
+    }
 
     explicit WebSocket(BorrowedStream &sock) : sock(sock) {
+    }
+
+    Task<Expected<>> SendPacket(WebSocketPacket packet, uint32_t mask = 0)
+    {
+        auto lock = co_await co_await _mtx.lock();
+        co_await co_await wsSendPacket(sock, packet, mask);
+        co_return {};
+    }
+
+    Task<Expected<WebSocketPacket>> RecvPacket()
+    {
+        co_return co_await wsRecvPacket(sock);
     }
 
     bool is_closing() const noexcept {
@@ -207,7 +229,7 @@ struct WebSocket {
         if (mHalfClosed) [[unlikely]] {
             co_return std::errc::broken_pipe;
         }
-        co_return co_await wsSendPacket(sock, WebSocketPacket{
+        co_return co_await SendPacket(WebSocketPacket{
             .opcode = WebSocketPacket::kOpcodeText,
             .content = text,
         });
@@ -219,7 +241,7 @@ struct WebSocket {
         content.resize(sizeof(code));
         std::memcpy(content.data(), &code, sizeof(code));
         mHalfClosed = true;
-        co_return co_await wsSendPacket(sock, WebSocketPacket{
+        co_return co_await SendPacket(WebSocketPacket{
             .opcode = WebSocketPacket::kOpcodeClose,
             .content = content,
         });
@@ -228,7 +250,7 @@ struct WebSocket {
     Task<Expected<>> sendPing() {
         mLastPingTime = std::chrono::steady_clock::now();
         // debug(), "主动ping";
-        co_return co_await wsSendPacket(sock, WebSocketPacket{
+        co_return co_await SendPacket(WebSocketPacket{
             .opcode = WebSocketPacket::kOpcodePing,
             .content = {},
         });
@@ -236,7 +258,7 @@ struct WebSocket {
 
     Task<Expected<>> start(std::chrono::steady_clock::duration pingPongTimeout = std::chrono::seconds(5)) {
         while (true) {
-            auto maybePacket = co_await co_timeout(wsRecvPacket(sock), pingPongTimeout);
+            auto maybePacket = co_await co_timeout(RecvPacket(), pingPongTimeout);
             if (maybePacket == std::errc::stream_timeout) {
                 if (mWaitingPong) {
                     break;
@@ -256,7 +278,7 @@ struct WebSocket {
                 }
             } else if (packet.opcode == packet.kOpcodePing) {
                 packet.opcode = packet.kOpcodePong;
-                co_await co_await wsSendPacket(sock, packet);
+                co_await co_await SendPacket(packet);
             } else if (packet.opcode == packet.kOpcodePong) {
                 auto now = std::chrono::steady_clock::now();
                 if (mOnPong && mLastPingTime.time_since_epoch().count() != 0) {
@@ -268,7 +290,7 @@ struct WebSocket {
                     co_await co_await mOnClose(*this);
                 }
                 if (!mHalfClosed) {
-                    co_await co_await wsSendPacket(sock, packet);
+                    co_await co_await SendPacket(packet);
                     mHalfClosed = true;
                 } else {
                     break;
@@ -280,14 +302,14 @@ struct WebSocket {
     }
 };
 
-inline Task<Expected<WebSocket>> websocket_server(HTTPServer::IO::Ptr &io) {
-    if (co_await co_await httpUpgradeToWebSocket(io)) {
-        co_return WebSocket(io->extractSocket());
-    }
-    co_return std::errc::protocol_error;
+inline Task<WebSocket::Ptr> websocket_server(HTTPServer::IO::Ptr &io) {
+    auto e = co_await httpUpgradeToWebSocket(io);
+    if (e && *e)
+        co_return std::make_shared<WebSocket>(io->extractSocket());
+    co_return nullptr;
 }
 
-inline Task<Expected<WebSocket>> websocket_client(HTTPConnection &conn, URI uri) {
+inline Task<Expected<WebSocket::Ptr>> websocket_client(HTTPConnection &conn, URI uri, HTTPHeaders headers = {}) {
     std::string nonceKey;
     using namespace std::string_literals;
     nonceKey = websocketGenerateNonce();
@@ -301,11 +323,14 @@ inline Task<Expected<WebSocket>> websocket_client(HTTPConnection &conn, URI uri)
             {"sec-websocket-version"s, "13"s},
         },
     };
+    for (auto &[key, value]: headers)
+        request.headers.emplace(key, value);
+
     auto [response, _] = co_await co_await conn.request(request);
     if (response.headers.get("sec-websocket-accept") != websocketSecretHash(nonceKey)) {
         co_return std::errc::protocol_error;
     }
-    co_return WebSocket(conn.extractSocket());
+    co_return std::make_shared<WebSocket>(conn.extractSocket());
 }
 
 }

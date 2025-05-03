@@ -9,6 +9,7 @@
 #include <co_async/platform/socket.hpp>
 #include <co_async/utils/pimpl.hpp>
 #include <co_async/utils/string_utils.hpp>
+#include <openssl/ssl.h>
 
 namespace co_async {
 
@@ -18,16 +19,15 @@ using deleted_unique_ptr = std::unique_ptr<T,std::function<void(T*)>>;
 #define BUFFER_SIZE 512
 
 namespace {
-struct SSLSocketStream : Stream {
+struct SSLSocketStream : SocketStream {
 private:
-    SocketStream raw;
     BIO *readBIO;
     BIO *writeBIO;
     std::unique_ptr<char> _buffer;
     deleted_unique_ptr<SSL> ssl_client = nullptr;
 
     public:
-    explicit SSLSocketStream(SocketHandle file) : raw(std::move(file)) 
+    explicit SSLSocketStream(SocketHandle file) : SocketStream(std::move(file)) 
     {
         _buffer = std::unique_ptr<char>(new char[BUFFER_SIZE]);
     }
@@ -40,7 +40,7 @@ private:
             int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
             if (bytesToWrite > 0)
             {
-                auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
+                auto e = co_await SocketStream::raw_write({_buffer.get(), (size_t)bytesToWrite});
                 if (!e)
                 {
                     if (e.has_error())
@@ -51,7 +51,7 @@ private:
             }
             else
             {
-                auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
+                auto e = co_await SocketStream::raw_read({_buffer.get(), BUFFER_SIZE});
                 if (!e)
                 {
                     if (e.has_error())
@@ -104,7 +104,7 @@ public:
     Task<Expected<std::size_t>> raw_read(std::span<char> buffer) override
     {
         // SSL_read overrides buffer
-        while (raw.get())
+        while (true)
         {
             int sizeUnencryptBytes = SSL_read(ssl_client.get(), buffer.data(), buffer.size());
             if (sizeUnencryptBytes < 0)
@@ -114,22 +114,13 @@ public:
                     default:
                         co_return 0;
                 }
-            else
+            else if (sizeUnencryptBytes != 0)
                 co_return sizeUnencryptBytes;
 
-            auto e = co_await raw.raw_read({_buffer.get(), BUFFER_SIZE});
-            if (!e)
-            {
-                if (e.has_error())
-                    co_return CO_ASYNC_ERROR_FORWARD(e);
-                else
-                    co_return std::errc::broken_pipe;
-            }
-            size_t receivedBytes = *(e);
+            auto receivedBytes = co_await co_await SocketStream::raw_read({_buffer.get(), BUFFER_SIZE});
             if (receivedBytes > 0)
                 BIO_write(readBIO, _buffer.get(), receivedBytes);
-
-            if (receivedBytes == 0)
+            else if (receivedBytes == 0)
                 co_return std::errc::broken_pipe;
         }
         co_return 0;
@@ -144,7 +135,7 @@ public:
         uint64_t send_byte = 0;
         do {
             int sizeUnencryptBytes = SSL_write(ssl_client.get(), buffer.data() + send_byte, buffer.size() - send_byte);
-            if (sizeUnencryptBytes <= 0)
+            if (sizeUnencryptBytes < 0)
                 break;
 
             send_byte += sizeUnencryptBytes;
@@ -152,17 +143,16 @@ public:
                 int bytesToWrite = BIO_read(writeBIO, _buffer.get(), BUFFER_SIZE);
                 if (bytesToWrite > 0)
                 {
-                    auto e = co_await raw.raw_write({_buffer.get(), (size_t)bytesToWrite});
-                    if (!e)
+                    size_t sendBytes = 0;
+                    while (true)
                     {
-                        if (e.has_error())
-                            co_return CO_ASYNC_ERROR_FORWARD(e);
-                        else
+                        if (sendBytes >= bytesToWrite)
+                            break;
+                        auto n = co_await co_await SocketStream::raw_write({_buffer.get() + sendBytes, (size_t)(bytesToWrite - sendBytes)});
+                        if (n == 0)
                             co_return std::errc::broken_pipe;
+                        sendBytes += n;
                     }
-                    size_t sendBytes = *e;
-                    if (sendBytes == 0)
-                        co_return std::errc::broken_pipe;
                 }
                 else
                 {
@@ -177,13 +167,13 @@ public:
     {
         SSL_shutdown(ssl_client.get());
         co_await Stream::raw_close();
-        co_await raw.raw_close();
+        co_await SocketStream::raw_close();
         co_return;
     }
 
-    void raw_timeout(std::chrono::steady_clock::duration timeout) override 
+    void raw_timeout(std::chrono::steady_clock::duration timeout) override
     {
-        raw.raw_timeout(timeout);
+        SocketStream::raw_timeout(timeout);
     }
 };
 
