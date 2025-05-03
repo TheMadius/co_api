@@ -76,7 +76,7 @@ Worker &getWorker(int i)
 Task<Expected<>> ws_connect()
 {
     HTTPConnectionPool pool;
-    auto conn = co_await co_await pool.connect("https://192.168.0.106:8080");
+    auto conn = co_await co_await pool.connect("https://127.0.0.1:8080");
     auto ws_connect = co_await co_await co_async::websocket_client(*conn, {"/"}, {{"X-Vsaas-Api-Key"s, "000000"s}});
 
     ws_connect->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>>
@@ -98,18 +98,18 @@ Task<Expected<>> ws_connect()
         co_return {};
     });
 
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await ws_connect->send("11111111111111111111111111111111111111111111");
-    co_await co_await ws_connect->start();
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_awaits ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await co_await ws_connect->start(std::chrono::seconds(25));
     co_return {};
 }
 
@@ -145,8 +145,9 @@ static Task<Expected<>> amain(std::string serveAt) {
     {
         if (auto ws = co_await websocket_server(io)) {
             co_await co_await stdio().putline("Connection"sv);
-            ws->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>> {
-                co_await co_await stdio().putline("message received: "s + message);
+            ws->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>>
+            {
+                co_await co_await stdio().putline("Msg : "s + message);
                 co_return {};
             });
             ws->on_close([] (co_async::WebSocket &ws) -> Task<Expected<>> {
@@ -190,7 +191,7 @@ static Task<Expected<>> amain(std::string serveAt) {
 
     SSLServerState ssl;
     ssl.initSSLctx("../cert/server.crt", "../cert/server.key");
-    co_spawn(ws_connect());
+    getWorker().spawn(ws_connect());
 
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
