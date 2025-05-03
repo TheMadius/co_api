@@ -199,7 +199,7 @@ struct WebSocket : public std::enable_shared_from_this<WebSocket>
 
     Task<Expected<>> SendPacket(WebSocketPacket packet, uint32_t mask = 0)
     {
-        auto lock = co_await co_await _mtx.lock();
+        // auto lock = co_await co_await _mtx.lock();
         co_await co_await wsSendPacket(sock, packet, mask);
         co_return {};
     }

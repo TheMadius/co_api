@@ -76,7 +76,7 @@ Worker &getWorker(int i)
 Task<Expected<>> ws_connect()
 {
     HTTPConnectionPool pool;
-    auto conn = co_await co_await pool.connect("https://192.168.0.106:19999");
+    auto conn = co_await co_await pool.connect("https://192.168.0.106:8080");
     auto ws_connect = co_await co_await co_async::websocket_client(*conn, {"/"}, {{"X-Vsaas-Api-Key"s, "000000"s}});
 
     ws_connect->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>>
@@ -98,16 +98,17 @@ Task<Expected<>> ws_connect()
         co_return {};
     });
 
-    std::weak_ptr ws_weak = ws_connect;
-    co_spawn(co_bind([ws_weak]() -> Task<Expected<>>
-    {
-        while (auto strong_ws = ws_weak.lock())
-        {
-            co_await strong_ws->send("popopopopopopop");
-        }
-        co_return {};
-    }));
-
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
+    co_await ws_connect->send("11111111111111111111111111111111111111111111");
     co_await co_await ws_connect->start();
     co_return {};
 }
@@ -118,7 +119,7 @@ static Task<Expected<>> curl() {
     std::vector<Task<Expected<>>> res;
     for (std::string path: {"cameras"}) {
         res.push_back(co_bind([&, path] () -> Task<Expected<>> {
-            auto conn = co_await co_await pool.connect("https://10.23.18.4:10001");
+            auto conn = co_await co_await pool.connect("http://10.23.18.4:10001");
             HTTPRequest req = {
                 .method = "GET",
                 .uri = URI::parse("/" + path),
@@ -136,7 +137,6 @@ static Task<Expected<>> curl() {
 }
 
 static Task<Expected<>> amain(std::string serveAt) {
-    co_await ws_connect();
     co_await co_await stdio().putline("listening at: "s + serveAt);
     auto listener = co_await co_await listener_bind(co_await AddressResolver().host(serveAt).resolve_one());
 
@@ -147,7 +147,6 @@ static Task<Expected<>> amain(std::string serveAt) {
             co_await co_await stdio().putline("Connection"sv);
             ws->on_message([] (co_async::WebSocket &ws, std::string const &message) -> Task<Expected<>> {
                 co_await co_await stdio().putline("message received: "s + message);
-                co_await co_await ws.send("Got it! "s + message);
                 co_return {};
             });
             ws->on_close([] (co_async::WebSocket &ws) -> Task<Expected<>> {
@@ -191,6 +190,7 @@ static Task<Expected<>> amain(std::string serveAt) {
 
     SSLServerState ssl;
     ssl.initSSLctx("../cert/server.crt", "../cert/server.key");
+    co_spawn(ws_connect());
 
     while (true) {
         if (auto income = co_await listener_accept(listener)) [[likely]] {
