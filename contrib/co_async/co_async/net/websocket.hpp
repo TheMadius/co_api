@@ -184,7 +184,7 @@ struct WebSocket : public std::enable_shared_from_this<WebSocket>
 
     co_async::Mutex<> _mtx;
     bool mHalfClosed = false;
-    bool mWaitingPong = true;
+    bool mWaitingPong = false;
     std::chrono::steady_clock::time_point mLastPingTime{};
 
     WebSocket(WebSocket &&other) : sock(other.sock)
